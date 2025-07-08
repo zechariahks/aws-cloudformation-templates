@@ -88,14 +88,10 @@ Outputs:
   ApplicationId:
     Description: 'Q Business Application ID'
     Value: !Ref QBusinessApplication
-    Export:
-      Name: !Sub '${AWS::StackName}-ApplicationId'
   
   ApplicationArn:
     Description: 'Q Business Application ARN'
     Value: !GetAtt QBusinessApplication.ApplicationArn
-    Export:
-      Name: !Sub '${AWS::StackName}-ApplicationArn'
   
   ServiceRoleArn:
     Description: 'Service Role ARN for Q Business'
