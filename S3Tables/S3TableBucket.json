@@ -1,0 +1,90 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Create an Amazon S3 Tables bucket for analytics workloads. This template demonstrates setup for high-performance analytical queries with Apache Iceberg format.",
+  "Parameters": {
+    "TableBucketName": {
+      "Type": "String",
+      "Default": "my-analytics-table-bucket",
+      "Description": "Name for the S3 Tables bucket",
+      "MinLength": 3,
+      "MaxLength": 63,
+      "AllowedPattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$"
+    }
+  },
+  "Resources": {
+    "S3TableBucket": {
+      "Type": "AWS::S3Tables::TableBucket",
+      "Properties": {
+        "TableBucketName": "TableBucketName",
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "Development"
+          },
+          {
+            "Key": "Workload",
+            "Value": "Analytics"
+          },
+          {
+            "Key": "DataFormat",
+            "Value": "Iceberg"
+          }
+        ]
+      }
+    },
+    "TableBucketPolicy": {
+      "Type": "AWS::S3Tables::TableBucketPolicy",
+      "Properties": {
+        "TableBucketArn": "S3TableBucket.TableBucketArn",
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "AllowAnalyticsAccess",
+              "Effect": "Allow",
+              "Principal": {
+                "AWS": "arn:aws:iam::${AWS::AccountId}:root"
+              },
+              "Action": [
+                "s3tables:GetTable",
+                "s3tables:GetTableMetadata",
+                "s3tables:GetTableData",
+                "s3tables:PutTableData",
+                "s3tables:UpdateTableMetadata"
+              ],
+              "Resource": "${S3TableBucket.TableBucketArn}/*",
+              "Condition": {
+                "StringEquals": {
+                  "s3tables:ExpressionType": "SQL"
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "TableBucketName": {
+      "Description": "S3 Tables Bucket Name",
+      "Value": "S3TableBucket",
+      "Export": {
+        "Name": "${AWS::StackName}-TableBucketName"
+      }
+    },
+    "TableBucketArn": {
+      "Description": "S3 Tables Bucket ARN",
+      "Value": "S3TableBucket.TableBucketArn",
+      "Export": {
+        "Name": "${AWS::StackName}-TableBucketArn"
+      }
+    },
+    "TableBucketEndpoint": {
+      "Description": "S3 Tables Bucket Endpoint",
+      "Value": "S3TableBucket.TableBucketEndpoint",
+      "Export": {
+        "Name": "${AWS::StackName}-TableBucketEndpoint"
+      }
+    }
+  }
+}
