@@ -32,7 +32,7 @@
           ]
         },
         "ManagedPolicyArns": [
-          "arn:aws:iam::aws:policy/service-role/AmazonQBusinessServiceRolePolicy"
+          "arn:aws:iam::aws:policy/service-role/QBusinessServiceRolePolicy"
         ],
         "Tags": [
           {

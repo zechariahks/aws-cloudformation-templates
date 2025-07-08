@@ -1,6 +1,10 @@
 # Amazon Q Business Templates
 
-Amazon Q Business is an enterprise AI assistant that helps organizations unlock insights from their data and documents.
+Amazon Q Business is the most capable generative AI-powered assistant for finding information, gaining insight, and taking action at work. It makes generative AI securely accessible to everyone in your organization, and helps your employees get work done faster. Anyone in the organization can use natural language to request information or assistance to generate content or create lightweight apps that automate workflows.
+
+More Info: https://aws.amazon.com/q/business/
+Pricing: https://aws.amazon.com/q/business/pricing/
+Features: https://aws.amazon.com/q/business/features/
 
 ## Templates
 
@@ -31,6 +35,8 @@ Creates a basic Q Business application with:
 - Tags resources for governance
 
 ## Deployment
+
+- Provide a valid IdentityCenterInstanceArn in the below command before running it.
 
 ```bash
 aws cloudformation create-stack \
