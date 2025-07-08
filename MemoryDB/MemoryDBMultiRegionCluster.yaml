@@ -1,0 +1,150 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Create an Amazon MemoryDB cluster for global caching with Redis compatibility. This template demonstrates setup for high availability and performance.'
+
+Parameters:
+  ClusterName:
+    Type: String
+    Default: 'memorydb-cluster'
+    Description: 'Name for the MemoryDB cluster'
+    MinLength: 1
+    MaxLength: 40
+    AllowedPattern: '^[a-z][a-z0-9-]*[a-z0-9]$'
+  
+  NodeType:
+    Type: String
+    Default: 'db.r7g.large'
+    Description: 'Node type for cluster instances'
+    AllowedValues:
+      - 'db.r7g.large'
+      - 'db.r7g.xlarge'
+      - 'db.r7g.2xlarge'
+  
+  NumShards:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 500
+    Description: 'Number of shards in the cluster'
+
+  AdminPassword:
+    Type: String
+    NoEcho: true
+    Description: 'Password for the admin user (minimum 16 characters)'
+    MinLength: 16
+    MaxLength: 128
+
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: '10.0.0.0/16'
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: MemoryDB-VPC
+
+  PrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: '10.0.1.0/24'
+      AvailabilityZone: !Select [0, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: MemoryDB-Private-1
+
+  PrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: '10.0.2.0/24'
+      AvailabilityZone: !Select [1, !GetAZs '']
+      Tags:
+        - Key: Name
+          Value: MemoryDB-Private-2
+
+  MemoryDBSubnetGroup:
+    Type: AWS::MemoryDB::SubnetGroup
+    Properties:
+      SubnetGroupName: !Sub '${ClusterName}-subnet-group'
+      Description: 'Subnet group for MemoryDB cluster'
+      SubnetIds:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-subnet-group'
+
+  MemoryDBParameterGroup:
+    Type: AWS::MemoryDB::ParameterGroup
+    Properties:
+      ParameterGroupName: !Sub '${ClusterName}-params'
+      Family: 'memorydb_redis7'
+      Description: 'Parameter group for MemoryDB cluster'
+      Parameters:
+        maxmemory-policy: 'allkeys-lru'
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-params'
+
+  MemoryDBUser:
+    Type: AWS::MemoryDB::User
+    Properties:
+      UserName: 'admin-user'
+      AccessString: 'on ~* &* +@all'
+      AuthenticationMode:
+        Type: 'password'
+        Passwords:
+          - !Ref AdminPassword
+      Tags:
+        - Key: Role
+          Value: Administrator
+
+  MemoryDBACL:
+    Type: AWS::MemoryDB::ACL
+    Properties:
+      ACLName: !Sub '${ClusterName}-acl'
+      UserNames:
+        - !Ref MemoryDBUser
+      Tags:
+        - Key: Name
+          Value: !Sub '${ClusterName}-acl'
+
+  MemoryDBCluster:
+    Type: AWS::MemoryDB::Cluster
+    Properties:
+      ClusterName: !Ref ClusterName
+      Description: 'MemoryDB cluster for high-performance caching'
+      NodeType: !Ref NodeType
+      NumShards: !Ref NumShards
+      ACLName: !Ref MemoryDBACL
+      SubnetGroupName: !Ref MemoryDBSubnetGroup
+      ParameterGroupName: !Ref MemoryDBParameterGroup
+      Port: 6379
+      TLSEnabled: true
+      DataTiering: false
+      Tags:
+        - Key: Environment
+          Value: Production
+        - Key: Purpose
+          Value: GlobalCache
+
+Outputs:
+  ClusterName:
+    Description: 'MemoryDB Cluster Name'
+    Value: !Ref MemoryDBCluster
+    Export:
+      Name: !Sub '${AWS::StackName}-ClusterName'
+  
+  ClusterArn:
+    Description: 'MemoryDB Cluster ARN'
+    Value: !GetAtt MemoryDBCluster.ARN
+    Export:
+      Name: !Sub '${AWS::StackName}-ClusterArn'
+
+  ClusterEndpoint:
+    Description: 'MemoryDB Cluster Endpoint'
+    Value: !GetAtt MemoryDBCluster.ClusterEndpoint.Address
+    Export:
+      Name: !Sub '${AWS::StackName}-ClusterEndpoint'

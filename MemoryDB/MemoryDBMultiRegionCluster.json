@@ -1,0 +1,247 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Description": "Create an Amazon MemoryDB Multi-Region cluster for global caching with Redis compatibility. This template demonstrates setup for high availability across regions.",
+    "Parameters": {
+        "ClusterName": {
+            "Description": "Name for the MemoryDB Multi-Region cluster",
+            "Type": "String",
+            "Default": "memorydb-global-cluster",
+            "MinLength": 1,
+            "MaxLength": 40,
+            "AllowedPattern": "^[a-z][a-z0-9-]*[a-z0-9]$"
+        },
+        "NodeType": {
+            "Description": "Node type for cluster instances",
+            "Type": "String",
+            "AllowedValues": [
+                "db.r7g.large",
+                "db.r7g.xlarge",
+                "db.r7g.2xlarge"
+            ],
+            "Default": "db.r7g.large"
+        },
+        "Engine": {
+            "Description": "Database engine",
+            "Type": "String",
+            "AllowedValues": [
+                "redis"
+            ],
+            "Default": "redis"
+        }
+    },
+    "Resources": {
+        "MemoryDBSubnetGroup": {
+            "Type": "AWS::MemoryDB::SubnetGroup",
+            "Properties": {
+                "SubnetGroupName": {
+                    "Fn::Sub": "${ClusterName}-subnet-group"
+                },
+                "Description": "Subnet group for MemoryDB cluster",
+                "SubnetIds": [
+                    {
+                        "Ref": "PrivateSubnet1"
+                    },
+                    {
+                        "Ref": "PrivateSubnet2"
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Sub": "${ClusterName}-subnet-group"
+                        }
+                    }
+                ]
+            }
+        },
+        "MemoryDBParameterGroup": {
+            "Type": "AWS::MemoryDB::ParameterGroup",
+            "Properties": {
+                "ParameterGroupName": {
+                    "Fn::Sub": "${ClusterName}-params"
+                },
+                "Family": "memorydb_redis7",
+                "Description": "Parameter group for MemoryDB cluster",
+                "Parameters": {
+                    "maxmemory-policy": "allkeys-lru"
+                },
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Sub": "${ClusterName}-params"
+                        }
+                    }
+                ]
+            }
+        },
+        "MemoryDBUser": {
+            "Type": "AWS::MemoryDB::User",
+            "Properties": {
+                "UserName": "admin-user",
+                "AccessString": "on ~* &* +@all",
+                "AuthenticationMode": {
+                    "Type": "password",
+                    "Passwords": [
+                        {
+                            "Ref": "AdminPassword"
+                        }
+                    ]
+                },
+                "Tags": [
+                    {
+                        "Key": "Role",
+                        "Value": "Administrator"
+                    }
+                ]
+            }
+        },
+        "MemoryDBACL": {
+            "Type": "AWS::MemoryDB::ACL",
+            "Properties": {
+                "ACLName": {
+                    "Fn::Sub": "${ClusterName}-acl"
+                },
+                "UserNames": [
+                    {
+                        "Ref": "MemoryDBUser"
+                    }
+                ],
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": {
+                            "Fn::Sub": "${ClusterName}-acl"
+                        }
+                    }
+                ]
+            }
+        },
+        "MemoryDBMultiRegionCluster": {
+            "Type": "AWS::MemoryDB::MultiRegionCluster",
+            "Properties": {
+                "MultiRegionClusterName": {
+                    "Ref": "ClusterName"
+                },
+                "Description": "Global MemoryDB cluster for caching",
+                "Engine": {
+                    "Ref": "Engine"
+                },
+                "NodeType": {
+                    "Ref": "NodeType"
+                },
+                "MultiRegionParameterGroupName": {
+                    "Ref": "MemoryDBParameterGroup"
+                },
+                "UpdatePolicy": {
+                    "MultiRegionClusterReplicationUpdatePolicy": {
+                        "UpdateStrategy": "coordinated-update"
+                    }
+                },
+                "Tags": [
+                    {
+                        "Key": "Environment",
+                        "Value": "Production"
+                    },
+                    {
+                        "Key": "Purpose",
+                        "Value": "GlobalCache"
+                    }
+                ]
+            }
+        },
+        "PrivateSubnet1": {
+            "Type": "AWS::EC2::Subnet",
+            "Properties": {
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "CidrBlock": "10.0.1.0/24",
+                "AvailabilityZone": {
+                    "Fn::Select": [
+                        0,
+                        {
+                            "Fn::GetAZs": null
+                        }
+                    ]
+                },
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": "MemoryDB-Private-1"
+                    }
+                ]
+            }
+        },
+        "PrivateSubnet2": {
+            "Type": "AWS::EC2::Subnet",
+            "Properties": {
+                "VpcId": {
+                    "Ref": "VPC"
+                },
+                "CidrBlock": "10.0.2.0/24",
+                "AvailabilityZone": {
+                    "Fn::Select": [
+                        1,
+                        {
+                            "Fn::GetAZs": null
+                        }
+                    ]
+                },
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": "MemoryDB-Private-2"
+                    }
+                ]
+            }
+        },
+        "VPC": {
+            "Type": "AWS::EC2::VPC",
+            "Properties": {
+                "CidrBlock": "10.0.0.0/16",
+                "EnableDnsHostnames": true,
+                "EnableDnsSupport": true,
+                "Tags": [
+                    {
+                        "Key": "Name",
+                        "Value": "MemoryDB-VPC"
+                    }
+                ]
+            }
+        },
+        "AdminPassword": {
+            "Type": "AWS::SSM::Parameter::Value<String>",
+            "Default": "/memorydb/admin/password",
+            "NoEcho": true
+        }
+    },
+    "Outputs": {
+        "MultiRegionClusterName": {
+            "Description": "MemoryDB Multi-Region Cluster Name",
+            "Value": {
+                "Ref": "MemoryDBMultiRegionCluster"
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-ClusterName"
+                }
+            }
+        },
+        "MultiRegionClusterArn": {
+            "Description": "MemoryDB Multi-Region Cluster ARN",
+            "Value": {
+                "Fn::GetAtt": [
+                    "MemoryDBMultiRegionCluster",
+                    "MultiRegionClusterArn"
+                ]
+            },
+            "Export": {
+                "Name": {
+                    "Fn::Sub": "${AWS::StackName}-ClusterArn"
+                }
+            }
+        }
+    }
+}
