@@ -76,14 +76,32 @@ The deploying user/role needs permissions for:
    aws sso-admin list-instances
    ```
 
-2. **Prepare S3 Bucket**:
-   ```bash
-   # Create bucket if needed
-   aws s3 mb s3://your-company-documents
+2. **Set Up S3 Bucket with Sample Data**:
    
-   # Upload sample documents
-   aws s3 cp documents/ s3://your-company-documents/ --recursive
+   **Option A: Automated Setup (Recommended)**
+   ```bash
+   # Use the provided script to create bucket and upload sample data
+   chmod +x setup-sample-data.sh
+   ./setup-sample-data.sh my-company-qbusiness-docs us-east-1
    ```
+   
+   **Option B: Manual Setup**
+   ```bash
+   # Create bucket manually
+   aws s3 mb s3://my-company-qbusiness-docs --region us-east-1
+   
+   # Upload your own documents
+   aws s3 cp documents/ s3://my-company-qbusiness-docs/ --recursive
+   ```
+
+3. **Sample Data Included**:
+   The setup script creates a complete set of sample company documents:
+   - **HR Policies**: Employee handbook, expense policy
+   - **IT Procedures**: Security procedures, access control
+   - **Engineering Manuals**: Onboarding guide, development processes
+   - **Support FAQs**: Customer support questions and answers
+   
+   Each document includes proper metadata for department, document type, and confidentiality level.
 
 ### Step 2: Deploy the Template
 
@@ -162,6 +180,36 @@ aws cloudformation describe-stacks \
   --query 'Stacks[0].Outputs[?OutputKey==`DashboardUrl`].OutputValue' \
   --output text
 ```
+
+### 5. Test with Sample Queries
+
+Once your data source sync is complete, try these sample queries in the Q Business web experience:
+
+**Policy Questions:**
+- "What is our expense policy for meals?"
+- "How much can I spend on hotel rooms when traveling?"
+- "What benefits does the company offer?"
+- "What is our code of conduct regarding professional behavior?"
+
+**Security and IT Questions:**
+- "How do I reset my password?"
+- "What are the password requirements?"
+- "How do we handle security incidents?"
+- "What is our data classification policy?"
+
+**Engineering and Process Questions:**
+- "How do new engineers get onboarded?"
+- "What development tools do we use?"
+- "What is our Git workflow?"
+- "How do we conduct code reviews?"
+
+**Customer Support Questions:**
+- "What are your business hours?"
+- "How do I contact customer support?"
+- "How do I export my data?"
+- "What payment methods do you accept?"
+
+These queries will help you verify that the document indexing and retrieval are working correctly.
 
 ## 🔧 Customization Options
 
