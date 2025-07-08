@@ -1,0 +1,62 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Create an Amazon DSQL serverless cluster for SQL workloads. This template demonstrates basic setup with proper security configurations and cost optimization.",
+  "Parameters": {
+    "ClusterName": {
+      "Type": "String",
+      "Default": "my-dsql-cluster",
+      "Description": "Name for the DSQL cluster",
+      "MinLength": 1,
+      "MaxLength": 63,
+      "AllowedPattern": "^[a-z][a-z0-9-]*[a-z0-9]$"
+    },
+    "DeletionProtection": {
+      "Type": "String",
+      "Default": "false",
+      "AllowedValues": [
+        "true",
+        "false"
+      ],
+      "Description": "Enable deletion protection for production workloads"
+    }
+  },
+  "Resources": {
+    "DSQLCluster": {
+      "Type": "AWS::DSQL::Cluster",
+      "Properties": {
+        "ClusterName": "ClusterName",
+        "DeletionProtectionEnabled": "DeletionProtection",
+        "Tags": [
+          {
+            "Key": "Environment",
+            "Value": "Development"
+          },
+          {
+            "Key": "Workload",
+            "Value": "Analytics"
+          },
+          {
+            "Key": "CostCenter",
+            "Value": "DataTeam"
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "ClusterIdentifier": {
+      "Description": "DSQL Cluster Identifier",
+      "Value": "DSQLCluster",
+      "Export": {
+        "Name": "${AWS::StackName}-ClusterIdentifier"
+      }
+    },
+    "ClusterArn": {
+      "Description": "DSQL Cluster ARN",
+      "Value": "DSQLCluster.ClusterArn",
+      "Export": {
+        "Name": "${AWS::StackName}-ClusterArn"
+      }
+    }
+  }
+}
