@@ -231,6 +231,18 @@ Resources:
                 'aws:SourceAccount': !Ref 'AWS::AccountId'
               ArnLike:
                 'aws:SourceArn': !Sub 'arn:aws:qbusiness:${AWS::Region}:${AWS::AccountId}:application/*'
+          - Sid: QBusinessWebExperiencePermission
+            Effect: Allow
+            Principal:
+              Service: application.qbusiness.amazonaws.com
+            Action: 
+              - sts:AssumeRole
+              - sts:SetContext
+            Condition:
+              StringEquals:
+                'aws:SourceAccount': !Ref 'AWS::AccountId'
+              ArnLike:
+                'aws:SourceArn': !Sub 'arn:aws:qbusiness:${AWS::Region}:${AWS::AccountId}:application/*'
       Policies:
         - PolicyName: QBusinessApplicationPolicy
           PolicyDocument:
@@ -268,6 +280,57 @@ Resources:
           Value: !Ref ApplicationName
         - Key: 'Purpose'
           Value: 'QBusiness-ServiceRole'
+
+  # IAM Role for Q Business Web Experience (separate role for web experience)
+  QBusinessWebExperienceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ApplicationName}-WebExperienceRole-${AWS::Region}'
+      Path: '/service-role/'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: QBusinessTrustPolicy
+            Effect: Allow
+            Principal:
+              Service: application.qbusiness.amazonaws.com
+            Action: 
+              - sts:AssumeRole
+              - sts:SetContext
+            Condition:
+              StringEquals:
+                'aws:SourceAccount': !Ref 'AWS::AccountId'
+              ArnEquals:
+                'aws:SourceArn': !Sub 'arn:aws:qbusiness:${AWS::Region}:${AWS::AccountId}:application/${QBusinessApplication}'
+      Policies:
+        - PolicyName: QBusinessWebExperiencePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AmazonQWebExperiencePermissions
+                Effect: Allow
+                Action:
+                  - 'qbusiness:Chat'
+                  - 'qbusiness:ChatSync'
+                  - 'qbusiness:ListMessages'
+                  - 'qbusiness:ListConversations'
+                  - 'qbusiness:DeleteConversation'
+                  - 'qbusiness:PutFeedback'
+                  - 'qbusiness:GetWebExperience'
+                  - 'qbusiness:GetApplication'
+                  - 'qbusiness:GetChatControlsConfiguration'
+                  - 'qbusiness:ListPlugins'
+                  - 'qbusiness:GetUser'
+                  - 'qbusiness:ListDataSources'
+                  - 'qbusiness:ListDocuments'
+                  - 'qbusiness:GetRetriever'
+                  - 'qbusiness:SearchRelevantContent'
+                Resource: '*'
+      Tags:
+        - Key: 'Application'
+          Value: !Ref ApplicationName
+        - Key: 'Purpose'
+          Value: 'QBusiness-WebExperience'
 
   # IAM Role for Data Source Access
   QBusinessDataSourceRole:
@@ -310,6 +373,22 @@ Resources:
                 Resource:
                   - !Sub 'arn:aws:s3:::${S3BucketName}'
                   - !Sub 'arn:aws:s3:::${S3BucketName}/*'
+        - PolicyName: QBusinessDataSourcePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: QBusinessDocumentPermissions
+                Effect: Allow
+                Action:
+                  - 'qbusiness:BatchPutDocument'
+                  - 'qbusiness:BatchDeleteDocument'
+                  - 'qbusiness:PutGroup'
+                  - 'qbusiness:CreateUser'
+                  - 'qbusiness:DeleteGroup'
+                  - 'qbusiness:ListGroups'
+                  - 'qbusiness:UpdateUser'
+                  - 'qbusiness:ListUsers'
+                Resource: '*'
       Tags:
         - Key: 'Application'
           Value: !Ref ApplicationName
@@ -442,7 +521,7 @@ Resources:
       Subtitle: !Ref WebExperienceSubtitle
       WelcomeMessage: !Sub 'Welcome to ${WebExperienceTitle}! I can help you find information from company documents, policies, and procedures. What would you like to know?'
       SamplePromptsControlMode: 'ENABLED'
-      RoleArn: !GetAtt QBusinessServiceRole.Arn
+      RoleArn: !GetAtt QBusinessWebExperienceRole.Arn
       Tags:
         - Key: 'Application'
           Value: !Ref ApplicationName
