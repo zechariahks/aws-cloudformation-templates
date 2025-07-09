@@ -1,6 +1,34 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: 'Comprehensive Amazon Q Business deployment for enterprise AI assistance with data sources, retrievers, web experience, and plugins for real-world use cases'
 
+# DEPLOYMENT NOTES AND FIXES:
+# 
+# This template includes several critical fixes discovered during testing:
+#
+# 1. QBusinessRetriever Configuration:
+#    - Uses NativeIndexConfiguration (not KendraIndexConfiguration)
+#    - Uses !GetAtt QBusinessIndex.IndexId (not !Ref) to get proper IndexId format
+#
+# 2. IAM Role Trust Policies:
+#    - Enhanced with multiple ARN patterns for broader compatibility
+#    - Includes both specific data source patterns and general application patterns
+#
+# 3. S3 Data Source Configuration:
+#    - Includes required 'syncMode' field set to 'FULL_CRAWL'
+#    - Includes 'version' field for schema compliance
+#    - Proper structure with all required nested configurations
+#
+# 4. Web Experience Configuration:
+#    - Includes RoleArn to prevent PENDING_AUTH_CONFIG status
+#    - This prevents the common 404 error on web experience URL
+#
+# 5. Post-Deployment Requirements:
+#    - Users must be created in Identity Center and assigned to the Q Business application
+#    - Users need passwords set in Identity Center to be considered "active"
+#    - Web experience will only become ACTIVE after proper user assignment
+#
+# For detailed deployment instructions and troubleshooting, see DEPLOYMENT-GUIDE.md
+
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -97,8 +125,11 @@ Parameters:
 
   EncryptionKeyId:
     Type: String
-    Default: 'alias/aws/qbusiness'
-    Description: 'KMS key ID for encryption (use alias/aws/qbusiness for AWS managed key)'
+    Default: 'AWS_MANAGED'
+    AllowedValues:
+      - 'AWS_MANAGED'
+      - 'CUSTOMER_MANAGED'
+    Description: 'Encryption type: AWS_MANAGED (free) or CUSTOMER_MANAGED (creates dedicated KMS key)'
 
   NotificationEmail:
     Type: String
@@ -108,15 +139,74 @@ Parameters:
 
 Conditions:
   HasSharePointConfig: !Not [!Equals [!Ref SharePointSiteUrl, 'https://yourcompany.sharepoint.com/sites/documents']]
+  UseCustomerManagedKey: !Equals [!Ref EncryptionKeyId, 'CUSTOMER_MANAGED']
 
 Resources:
+  # KMS Key for Customer Managed Encryption (optional)
+  QBusinessKMSKey:
+    Type: AWS::KMS::Key
+    Condition: UseCustomerManagedKey
+    Properties:
+      Description: !Sub 'KMS Key for Q Business Application: ${ApplicationName}'
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: Allow Q Business Service
+            Effect: Allow
+            Principal:
+              Service: qbusiness.amazonaws.com
+            Action:
+              - 'kms:Decrypt'
+              - 'kms:GenerateDataKey'
+              - 'kms:CreateGrant'
+            Resource: '*'
+            Condition:
+              StringEquals:
+                'aws:SourceAccount': !Ref 'AWS::AccountId'
+          - Sid: Allow CloudWatch Logs
+            Effect: Allow
+            Principal:
+              Service: !Sub 'logs.${AWS::Region}.amazonaws.com'
+            Action:
+              - 'kms:Encrypt'
+              - 'kms:Decrypt'
+              - 'kms:ReEncrypt*'
+              - 'kms:GenerateDataKey*'
+              - 'kms:DescribeKey'
+            Resource: '*'
+            Condition:
+              ArnEquals:
+                'kms:EncryptionContext:aws:logs:arn': !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/qbusiness/${ApplicationName}'
+      Tags:
+        - Key: 'Application'
+          Value: !Ref ApplicationName
+        - Key: 'Purpose'
+          Value: 'QBusiness-Encryption'
+
+  # KMS Key Alias
+  QBusinessKMSKeyAlias:
+    Type: AWS::KMS::Alias
+    Condition: UseCustomerManagedKey
+    Properties:
+      AliasName: !Sub 'alias/${ApplicationName}-qbusiness-key'
+      TargetKeyId: !Ref QBusinessKMSKey
+
   # CloudWatch Log Group for Q Business Application
   QBusinessLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub '/aws/qbusiness/${ApplicationName}'
       RetentionInDays: 90
-      KmsKeyId: !Ref EncryptionKeyId
+      KmsKeyId: !If 
+        - UseCustomerManagedKey
+        - !Ref QBusinessKMSKey
+        - !Ref 'AWS::NoValue'
       Tags:
         - Key: 'Application'
           Value: !Ref ApplicationName
@@ -195,7 +285,9 @@ Resources:
               StringEquals:
                 'aws:SourceAccount': !Ref 'AWS::AccountId'
               ArnLike:
-                'aws:SourceArn': !Sub 'arn:aws:qbusiness:${AWS::Region}:${AWS::AccountId}:application/*/index/*/data-source/*'
+                'aws:SourceArn': 
+                  - !Sub 'arn:aws:qbusiness:${AWS::Region}:${AWS::AccountId}:application/*/index/*/data-source/*'
+                  - !Sub 'arn:aws:qbusiness:${AWS::Region}:${AWS::AccountId}:application/*'
       Policies:
         - PolicyName: S3DataSourcePolicy
           PolicyDocument:
@@ -232,8 +324,10 @@ Resources:
       Description: !Ref ApplicationDescription
       RoleArn: !GetAtt QBusinessServiceRole.Arn
       IdentityCenterInstanceArn: !Ref IdentityCenterInstanceArn
-      EncryptionConfiguration:
-        KmsKeyId: !Ref EncryptionKeyId
+      EncryptionConfiguration: !If
+        - UseCustomerManagedKey
+        - KmsKeyId: !Ref QBusinessKMSKey
+        - !Ref 'AWS::NoValue'
       AttachmentsConfiguration:
         AttachmentsControlMode: ENABLED
       QAppsConfiguration:
@@ -284,11 +378,12 @@ Resources:
     Type: AWS::QBusiness::DataSource
     Properties:
       ApplicationId: !Ref QBusinessApplication
-      IndexId: !Ref QBusinessIndex
-      DisplayName: 'S3 Document Repository'
+      IndexId: !GetAtt QBusinessIndex.IndexId
+      DisplayName: 'S3DocumentRepository'
       Description: 'S3 bucket containing company documents and knowledge base'
       Configuration:
         type: 'S3'
+        syncMode: 'FULL_CRAWL'
         connectionConfiguration:
           repositoryEndpointMetadata:
             BucketName: !Ref S3BucketName
@@ -313,6 +408,7 @@ Resources:
           exclusionPatterns:
             - 'temp/*'
             - '*/archive/*'
+        version: '1.0.0'
       RoleArn: !GetAtt QBusinessDataSourceRole.Arn
       SyncSchedule: 'cron(0 2 * * ? *)'  # Daily at 2 AM
       Tags:
@@ -329,8 +425,8 @@ Resources:
       DisplayName: !Sub '${ApplicationName}-Retriever'
       Type: 'NATIVE_INDEX'
       Configuration:
-        nativeIndexConfiguration:
-          indexId: !Ref QBusinessIndex
+        NativeIndexConfiguration:
+          IndexId: !GetAtt QBusinessIndex.IndexId
       Tags:
         - Key: 'Application'
           Value: !Ref ApplicationName
@@ -346,6 +442,7 @@ Resources:
       Subtitle: !Ref WebExperienceSubtitle
       WelcomeMessage: !Sub 'Welcome to ${WebExperienceTitle}! I can help you find information from company documents, policies, and procedures. What would you like to know?'
       SamplePromptsControlMode: 'ENABLED'
+      RoleArn: !GetAtt QBusinessServiceRole.Arn
       Tags:
         - Key: 'Application'
           Value: !Ref ApplicationName
@@ -575,13 +672,13 @@ Outputs:
 
   WebExperienceUrl:
     Description: 'Q Business Web Experience URL'
-    Value: !GetAtt QBusinessWebExperience.WebExperienceUrl
+    Value: !GetAtt QBusinessWebExperience.DefaultEndpoint
     Export:
       Name: !Sub '${AWS::StackName}-WebExperienceUrl'
 
   IndexId:
     Description: 'Q Business Index ID'
-    Value: !Ref QBusinessIndex
+    Value: !GetAtt QBusinessIndex.IndexId
     Export:
       Name: !Sub '${AWS::StackName}-IndexId'
 
@@ -593,7 +690,7 @@ Outputs:
 
   S3DataSourceId:
     Description: 'S3 Data Source ID'
-    Value: !Ref S3DataSource
+    Value: !GetAtt S3DataSource.DataSourceId
     Export:
       Name: !Sub '${AWS::StackName}-S3DataSourceId'
 

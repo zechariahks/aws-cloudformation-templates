@@ -131,18 +131,26 @@ aws cloudformation describe-stack-events --stack-name enterprise-qbusiness
 
 ## 📊 Post-Deployment Configuration
 
-### 1. Access Web Experience
+### 1**Check Application Status**:
 
-After deployment, get the web experience URL:
+   ```bash
+   APPLICATION_ID=$(aws cloudformation describe-stacks \
+     --stack-name enterprise-qbusiness \
+     --query 'Stacks[0].Outputs[?OutputKey==`ApplicationId`].OutputValue' \
+     --output text)
+   
+   aws qbusiness get-application --application-id $APPLICATION_ID
+   ```
 
-```bash
-aws cloudformation describe-stacks \
-  --stack-name enterprise-qbusiness \
-  --query 'Stacks[0].Outputs[?OutputKey==`WebExperienceUrl`].OutputValue' \
-  --output text
-```
+### 2. **Verify Web Experience Status**:
+   ```bash
+   aws qbusiness list-web-experiences --application-id $APPLICATION_ID
+   ```
 
-### 2. Configure Data Source Sync
+   **Expected Status**: `ACTIVE`
+
+
+### 3. Configure Data Source Sync
 
 The S3 data source is configured to sync daily at 2 AM. To trigger manual sync:
 
@@ -153,6 +161,16 @@ DATA_SOURCE_ID=$(aws cloudformation describe-stacks \
   --query 'Stacks[0].Outputs[?OutputKey==`S3DataSourceId`].OutputValue' \
   --output text)
 
+APPLICATION_ID=$(aws cloudformation describe-stacks \
+  --stack-name enterprise-qbusiness \
+  --query 'Stacks[0].Outputs[?OutputKey==`ApplicationId`].OutputValue' \
+  --output text)
+
+INDEX_ID=$(aws cloudformation describe-stacks \
+  --stack-name enterprise-qbusiness \
+  --query 'Stacks[0].Outputs[?OutputKey==`IndexId`].OutputValue' \
+  --output text)
+
 # Start sync job
 aws qbusiness start-data-source-sync-job \
   --application-id $APPLICATION_ID \
@@ -160,28 +178,47 @@ aws qbusiness start-data-source-sync-job \
   --data-source-id $DATA_SOURCE_ID
 ```
 
-### 3. Set Up User Access
+### 4. Set Up User Access
 
 Configure users in Identity Center to access the Q Business application:
 
 1. Go to AWS IAM Identity Center console
-2. Add users to appropriate groups
-3. Assign Q Business application access
-4. Configure attribute mappings if needed
+2. Create users and Add users to appropriate groups
 
-### 4. Monitor Application Health
+  **Optional: Commands to Create User in Identity Center**:
+   ```bash
+   # Get Identity Store ID
+   IDENTITY_STORE_ID=$(aws sso-admin list-instances \
+     --query 'Instances[0].IdentityStoreId' --output text)
+   
+   # Create user
+   aws identitystore create-user \
+     --identity-store-id $IDENTITY_STORE_ID \
+     --user-name "qbusiness-admin" \
+     --display-name "Q Business Admin" \
+     --name Formatted="Q Business Admin",GivenName="QBusiness",FamilyName="Admin" \
+     --emails Value="admin@company.com",Primary=true
+   ```
+   
+3. Go to Q Business Console → Access Management
+4. Add user with Admin/User permissions
+5. Set password for the users in Identity Center
+6. Configure attribute mappings if needed
 
-Access the CloudWatch dashboard:
+### 5. Access web Experience URL
+
+After deployment, get the web experience URL:
 
 ```bash
-# Get dashboard URL
 aws cloudformation describe-stacks \
   --stack-name enterprise-qbusiness \
-  --query 'Stacks[0].Outputs[?OutputKey==`DashboardUrl`].OutputValue' \
+  --query 'Stacks[0].Outputs[?OutputKey==`WebExperienceUrl`].OutputValue' \
   --output text
 ```
 
-### 5. Test with Sample Queries
+- Login with the user created in the above step.
+
+### 6. Test with Sample Queries
 
 Once your data source sync is complete, try these sample queries in the Q Business web experience:
 
@@ -210,6 +247,19 @@ Once your data source sync is complete, try these sample queries in the Q Busine
 - "What payment methods do you accept?"
 
 These queries will help you verify that the document indexing and retrieval are working correctly.
+
+
+### 7. Monitor Application Health
+
+Access the CloudWatch dashboard:
+
+```bash
+# Get dashboard URL
+aws cloudformation describe-stacks \
+  --stack-name enterprise-qbusiness \
+  --query 'Stacks[0].Outputs[?OutputKey==`DashboardUrl`].OutputValue' \
+  --output text
+```
 
 ## 🔧 Customization Options
 
@@ -317,9 +367,115 @@ The template includes a Lambda function that publishes custom metrics:
 
 ## 🚨 Troubleshooting
 
-### Common Issues
+### Common Issues and Solutions
 
-#### 1. Data Source Sync Failures
+#### 1. QBusinessRetriever Configuration Errors
+
+**Error**: `Properties validation failed for resource QBusinessRetriever with message: #/Configuration: required key [NativeIndexConfiguration] not found`
+
+**Solution**: The retriever configuration requires `NativeIndexConfiguration` and the IndexId attribute:
+```yaml
+QBusinessRetriever:
+  Type: AWS::QBusiness::Retriever
+  Properties:
+    Type: 'NATIVE_INDEX'
+    Configuration:
+      NativeIndexConfiguration:
+        IndexId: !GetAtt QBusinessIndex.IndexId  # Use GetAtt, not Ref
+```
+
+#### 2. IAM Role Trust Policy Issues
+
+**Error**: `Please make sure your role exists, has qbusiness.amazonaws.com as trusted entity`
+
+**Solution**: Ensure the data source role has proper trust policy with conditions:
+```yaml
+AssumeRolePolicyDocument:
+  Statement:
+    - Effect: Allow
+      Principal:
+        Service: qbusiness.amazonaws.com
+      Action: sts:AssumeRole
+      Condition:
+        StringEquals:
+          'aws:SourceAccount': !Ref 'AWS::AccountId'
+        ArnLike:
+          'aws:SourceArn': 
+            - !Sub 'arn:aws:qbusiness:${AWS::Region}:${AWS::AccountId}:application/*/index/*/data-source/*'
+            - !Sub 'arn:aws:qbusiness:${AWS::Region}:${AWS::AccountId}:application/*'
+```
+
+#### 3. S3 Data Source Configuration Schema Errors
+
+**Error**: `Encountered 1 error(s) while processing the data source configuration input against the schema`
+
+**Solution**: The S3 data source configuration must include required fields:
+```yaml
+Configuration:
+  type: 'S3'                    # Required: Data source type
+  syncMode: 'FULL_CRAWL'        # Required: Sync mode
+  connectionConfiguration:       # Required: Connection details
+    repositoryEndpointMetadata:
+      BucketName: !Ref S3BucketName
+  repositoryConfigurations:      # Required: Repository config
+    document:
+      fieldMappings: [...]
+  version: '1.0.0'              # Recommended: Schema version
+```
+
+#### 4. Web Experience 404 Error (PENDING_AUTH_CONFIG)
+
+**Error**: Web experience shows 404 or "Page not found"
+
+**Root Cause**: Web experience stuck in `PENDING_AUTH_CONFIG` status
+
+**Solution Steps**:
+
+1. **Check Web Experience Status**:
+   ```bash
+   aws qbusiness get-web-experience \
+     --application-id YOUR_APP_ID \
+     --web-experience-id YOUR_WEB_EXP_ID
+   ```
+
+2. **If Status is PENDING_AUTH_CONFIG**:
+   - **Option A**: Delete and recreate web experience with proper role ARN
+   - **Option B**: Complete user assignment in Identity Center
+
+3. **Create Users in Identity Center**:
+   ```bash
+   # Create user
+   aws identitystore create-user \
+     --identity-store-id YOUR_IDENTITY_STORE_ID \
+     --user-name "qbusiness-admin" \
+     --display-name "Q Business Admin" \
+     --name Formatted="Q Business Admin",GivenName="QBusiness",FamilyName="Admin" \
+     --emails Value="admin@example.com",Primary=true
+   ```
+
+4. **Assign User to Q Business Application**:
+   - Go to AWS IAM Identity Center Console
+   - Navigate to Applications → Find Q Business app
+   - Assign users and set permissions
+   - Set user passwords in Identity Center
+
+5. **If Web Experience Still Stuck, Recreate It**:
+   ```bash
+   # Delete problematic web experience
+   aws qbusiness delete-web-experience \
+     --application-id YOUR_APP_ID \
+     --web-experience-id YOUR_WEB_EXP_ID
+   
+   # Create new one with role ARN
+   aws qbusiness create-web-experience \
+     --application-id YOUR_APP_ID \
+     --title "Enterprise Knowledge Assistant" \
+     --subtitle "Ask questions about company documents" \
+     --role-arn "arn:aws:iam::ACCOUNT:role/QBusinessRole" \
+     --sample-prompts-control-mode ENABLED
+   ```
+
+#### 5. Data Source Sync Failures
 ```bash
 # Check sync job status
 aws qbusiness list-data-source-sync-jobs \
@@ -333,15 +489,63 @@ aws logs filter-log-events \
   --start-time $(date -d '1 hour ago' +%s)000
 ```
 
-#### 2. Web Experience Access Issues
-- Verify Identity Center configuration
-- Check user group assignments
-- Validate application permissions
+#### 6. KMS Key Issues
 
-#### 3. High Costs
-- Review index capacity utilization
-- Audit data source inclusion patterns
-- Monitor user adoption metrics
+**Error**: KMS key access denied
+
+**Solution**: Ensure KMS key policy includes Q Business service permissions:
+```yaml
+- Sid: Allow Q Business Service
+  Effect: Allow
+  Principal:
+    Service: qbusiness.amazonaws.com
+  Action:
+    - 'kms:Decrypt'
+    - 'kms:GenerateDataKey'
+    - 'kms:CreateGrant'
+  Resource: '*'
+  Condition:
+    StringEquals:
+      'aws:SourceAccount': !Ref 'AWS::AccountId'
+```
+
+### Deployment Validation Checklist
+
+Before deploying, ensure:
+
+- [ ] Identity Center is enabled and configured
+- [ ] S3 bucket exists and contains documents
+- [ ] IAM permissions are sufficient for deployment
+- [ ] Email address is valid for notifications
+- [ ] Region supports Q Business service
+
+After deployment, verify:
+
+- [ ] Application status is ACTIVE
+- [ ] Index is created successfully  
+- [ ] Data source sync completes without errors
+- [ ] Web experience status is ACTIVE (not PENDING_AUTH_CONFIG)
+- [ ] Users can access web experience URL
+- [ ] CloudWatch dashboard shows metrics
+
+### Emergency Recovery
+
+If deployment fails completely:
+
+1. **Check CloudFormation Events**:
+   ```bash
+   aws cloudformation describe-stack-events --stack-name enterprise-qbusiness
+   ```
+
+2. **Delete and Redeploy**:
+   ```bash
+   aws cloudformation delete-stack --stack-name enterprise-qbusiness
+   # Wait for deletion to complete, then redeploy
+   ```
+
+3. **Partial Recovery** (if only web experience fails):
+   - Delete web experience manually
+   - Update stack to recreate it
 
 ### Monitoring Commands
 
